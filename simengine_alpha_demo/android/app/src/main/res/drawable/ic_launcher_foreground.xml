@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Simple placeholder silhouette (fuselage + swept wing), matching
+         the grey-on-grey placeholder aesthetic of the render itself —
+         swap for real branded artwork whenever that exists. -->
+    <path android:fillColor="#4A4D52"
+        android:pathData="M54,20 L60,48 L92,66 L92,72 L60,62 L60,80 L70,88 L70,92 L54,88 L38,92 L38,88 L48,80 L48,62 L16,72 L16,66 L48,48 Z" />
+</vector>

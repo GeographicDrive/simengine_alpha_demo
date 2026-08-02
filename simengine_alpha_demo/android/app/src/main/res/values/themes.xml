@@ -1,0 +1,22 @@
+<resources>
+    <!--
+      Without an explicit theme, android.app.NativeActivity falls back to
+      the platform default theme, which is a LIGHT theme with a WHITE
+      windowBackground — that background is what's visible before/around
+      whatever the EGL surface presents, and is the most likely cause of
+      an all-white screen with no rendering errors in logcat (the render
+      loop can be running correctly and still be invisible under this).
+
+      windowBackground is set to black (not just "no titlebar") so that
+      even in a worst case — EGL surface briefly not covering the full
+      window during a resize, or the decor view painting a frame before
+      our first swap — what shows through is black, not white, making it
+      visually obvious whether it's "engine hasn't drawn yet" (black)
+      vs "something is still wrong" (still white) on the next attempt.
+    -->
+    <style name="AppTheme" parent="android:Theme.Black.NoTitleBar.Fullscreen">
+        <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowContentOverlay">@null</item>
+    </style>
+</resources>

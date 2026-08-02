@@ -1,0 +1,42 @@
+{
+  "_comment": "Reference copy of the parameters aircraft_factory.cpp currently hardcodes for spawnGenericNarrowbody(). This file is NOT parsed at runtime yet in the Alpha (there is no JSON loader wired in) — it exists so the shape of a future per-aircraft data file is pinned down and reviewable, and so wiring up a real loader later is a mechanical change (read this shape, populate the same AircraftComponent fields) rather than a design decision. These are generic narrowbody-class magnitudes, not a certified aircraft's real aerodynamic database.",
+  "typeName": "generic-narrowbody",
+  "mass": {
+    "mass_kg": 64000.0,
+    "S_m2": 122.6,
+    "b_m": 34.1,
+    "c_m": 4.29,
+    "Ix": 2.4e6, "Iy": 3.4e6, "Iz": 5.6e6, "Ixz": 6.0e4
+  },
+  "aero": {
+    "CL0": 0.20, "CLa": 5.5, "CLq": 8.0, "CLde": 0.6,
+    "CD0": 0.022, "e": 0.80, "Mcrit": 0.78, "Kc": 0.10,
+    "alphaStall": 0.28,
+    "CD_gear": 0.018, "CD_brake": 0.0,
+    "CLflap": 0.6, "alphaStallFlap": 0.22, "CD_flap": 0.02,
+    "hasLoadFactorProtection": true,
+    "nMaxClean": 2.5, "nMinClean": -1.0,
+    "nMaxFlap": 2.0, "nMinFlap": 0.0,
+    "CYb": -0.8, "CYp": 0.0, "CYdr": 0.15,
+    "Clb": -0.09, "Clp": -0.4, "Clda": 0.12,
+    "Cm0": 0.02, "Cma": -1.0, "Cmq": -18.0, "Cmde": -1.3, "Cmdt": -0.6,
+    "Cnb": 0.12, "Cnp": -0.02, "Cnr": -0.2, "Cndr": -0.09
+  },
+  "propulsion": {
+    "type": "Jet",
+    "engineCount": 2,
+    "T_max_per_engine_N": 120000.0
+  },
+  "gear": [
+    { "name": "nose", "attachBody_m": [15.0, 0.0, 1.2], "strutLength_m": 1.8, "travel_m": 0.35,
+      "springConstant_Npm": 300000, "damperConstant_Npmps": 20000, "wheelRadius_m": 0.45,
+      "steerable": true, "maxSteerAngleDeg": 63, "hasBrake": false },
+    { "name": "L_main", "attachBody_m": [-1.0, -3.0, 1.6], "strutLength_m": 2.0, "travel_m": 0.45,
+      "springConstant_Npm": 900000, "damperConstant_Npmps": 60000, "wheelRadius_m": 0.55,
+      "steerable": false, "hasBrake": true },
+    { "name": "R_main", "attachBody_m": [-1.0, 3.0, 1.6], "strutLength_m": 2.0, "travel_m": 0.45,
+      "springConstant_Npm": 900000, "damperConstant_Npmps": 60000, "wheelRadius_m": 0.55,
+      "steerable": false, "hasBrake": true }
+  ],
+  "_note_on_real_A320_data": "A320-family.zip (provided alongside this build) is the FlightGear GPL 'A320-family' add-on: its A32x.xml files carry FDM tables in FlightGear's own JSDM/YASim schema, and its .ac files are AC3D meshes for FlightGear's renderer. Neither maps directly onto this engine's AeroCoefficients/mesh-binding model, so its numbers were not extracted into this file. Porting real A320 aerodynamic coefficients here (with correct attribution/licensing review, since that project is GPL) is future work, not done in this Alpha."
+}

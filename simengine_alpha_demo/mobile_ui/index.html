@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<!--
+  mobile_ui/index.html — Alpha Technical Demo touch UI mockup.
+
+  STATUS: this is a standalone, functional HTML/CSS/JS mockup of the
+  touch control layout, running against an in-page mock flight state
+  (see the `mockState` object and its interval loop near the bottom).
+  It is NOT wired to the C++ simengine build in this zip — there is no
+  WebAssembly/native bridge in this Alpha (see docs/ROADMAP.md). The
+  `InputSnapshot` fields each widget writes below correspond 1:1 to
+  simengine::systems::InputSnapshot (include/simengine/systems/input_system.hpp)
+  so wiring this up later is "replace mockState updates with calls into
+  the engine", not a UI redesign.
+
+  Layout deliberately omits camera and settings controls per the Alpha
+  scope: throttle, stick, rudder, flaps, gear, speedbrake, spoilers,
+  trim, brakes, reverse, pause only.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>simengine — Alpha Flight Controls</title>
+<style>
+  :root {
+    --bg: #0b0e12;
+    --panel: rgba(20, 24, 30, 0.72);
+    --panel-border: rgba(255,255,255,0.08);
+    --accent: #3ea6ff;
+    --accent-warn: #ff8a3d;
+    --accent-danger: #ff4d4d;
+    --text: #e7edf3;
+    --text-dim: #8b98a5;
+    --btn-active: #1c3a52;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    background: linear-gradient(180deg, #6f96b8 0%, #cfe0ea 55%, #9aa79b 100%);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    color: var(--text);
+    overflow: hidden;
+    touch-action: none;
+  }
+
+  #world {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; color: rgba(0,0,0,0.35); letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  #hud-top {
+    position: absolute; top: 0; left: 0; right: 0;
+    display: flex; justify-content: space-between; align-items: flex-start;
+    padding: env(safe-area-inset-top, 12px) 16px 0 16px;
+    pointer-events: none;
+  }
+  .tape {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
+    padding: 6px 14px;
+    font-variant-numeric: tabular-nums;
+    backdrop-filter: blur(6px);
+  }
+  .tape .label { font-size: 10px; color: var(--text-dim); letter-spacing: 0.08em; }
+  .tape .value { font-size: 20px; font-weight: 600; }
+
+  .hud-center {
+    display: flex; gap: 10px;
+  }
+
+  #hud-bottom {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    display: flex; align-items: flex-end; justify-content: space-between;
+    padding: 0 10px env(safe-area-inset-bottom, 10px) 10px;
+    gap: 8px;
+  }
+
+  /* --- Throttle (vertical) --- */
+  .throttle-wrap {
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    padding-bottom: 4px;
+  }
+  .throttle-track {
+    position: relative;
+    width: 54px; height: 220px;
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 27px;
+    backdrop-filter: blur(6px);
+  }
+  .throttle-fill {
+    position: absolute; left: 4px; right: 4px; bottom: 4px;
+    border-radius: 20px;
+    background: linear-gradient(180deg, var(--accent), #1d6fae);
+    transition: height 0.05s linear;
+  }
+  .throttle-handle {
+    position: absolute; left: -8px; right: -8px;
+    height: 34px;
+    background: #f2f5f8;
+    border-radius: 10px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700; color: #222;
+    letter-spacing: 0.05em;
+  }
+  .throttle-label { font-size: 11px; color: var(--text-dim); letter-spacing: 0.1em; }
+
+  /* --- Virtual joystick --- */
+  .stick-wrap {
+    position: relative;
+    width: 150px; height: 150px;
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 50%;
+    backdrop-filter: blur(6px);
+  }
+  .stick-crosshair {
+    position: absolute; inset: 0;
+  }
+  .stick-crosshair::before, .stick-crosshair::after {
+    content: ''; position: absolute; background: rgba(255,255,255,0.12);
+  }
+  .stick-crosshair::before { left: 50%; top: 8%; bottom: 8%; width: 1px; transform: translateX(-50%); }
+  .stick-crosshair::after { top: 50%; left: 8%; right: 8%; height: 1px; transform: translateY(-50%); }
+  .stick-knob {
+    position: absolute; width: 56px; height: 56px; border-radius: 50%;
+    left: 50%; top: 50%;
+    background: radial-gradient(circle at 35% 30%, #fdfefe, #cfd6dc);
+    box-shadow: 0 3px 8px rgba(0,0,0,0.45);
+    transform: translate(-50%, -50%);
+  }
+
+  /* --- Rudder pedal slider (horizontal) --- */
+  .rudder-wrap {
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+  }
+  .rudder-track {
+    position: relative;
+    width: 220px; height: 46px;
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 23px;
+    backdrop-filter: blur(6px);
+  }
+  .rudder-handle {
+    position: absolute; top: 4px; bottom: 4px; width: 44px;
+    left: 50%; transform: translateX(-50%);
+    background: #f2f5f8; border-radius: 18px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+  }
+  .rudder-center-tick {
+    position: absolute; left: 50%; top: 6px; bottom: 6px; width: 1px;
+    background: rgba(255,255,255,0.2);
+  }
+
+  /* --- Action button rows --- */
+  .action-col {
+    display: grid;
+    grid-template-columns: repeat(2, 56px);
+    gap: 8px;
+  }
+  .btn {
+    width: 56px; height: 56px;
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 12px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 3px;
+    backdrop-filter: blur(6px);
+    color: var(--text);
+    font-size: 9px;
+    letter-spacing: 0.03em;
+    text-align: center;
+    line-height: 1.15;
+  }
+  .btn svg { width: 20px; height: 20px; }
+  .btn.active { background: var(--btn-active); border-color: var(--accent); color: #bfe4ff; }
+  .btn.danger.active { background: #4a1f1f; border-color: var(--accent-danger); color: #ffd0d0; }
+  .btn.warn.active { background: #4a331f; border-color: var(--accent-warn); color: #ffe0c2; }
+  .btn:active { transform: scale(0.94); }
+
+  .trim-col {
+    display: flex; flex-direction: column; gap: 6px; align-items: center;
+  }
+  .trim-btn {
+    width: 56px; height: 30px;
+    background: var(--panel); border: 1px solid var(--panel-border); border-radius: 8px;
+    display:flex; align-items:center; justify-content:center; font-size: 14px;
+    backdrop-filter: blur(6px);
+  }
+  .trim-btn:active { background: var(--btn-active); }
+
+  .pause-btn {
+    position: absolute; top: env(safe-area-inset-top, 12px); right: 16px;
+    width: 40px; height: 40px; border-radius: 50%;
+    background: var(--panel); border: 1px solid var(--panel-border);
+    display: flex; align-items: center; justify-content: center;
+    backdrop-filter: blur(6px);
+    pointer-events: auto;
+  }
+</style>
+</head>
+<body>
+
+<div id="world">— infinite grey baseplate —</div>
+
+<div id="hud-top">
+  <div class="tape"><div class="label">IAS</div><div class="value" id="hud-ias">0</div></div>
+  <div class="hud-center">
+    <div class="tape"><div class="label">ALT (AGL)</div><div class="value" id="hud-alt">0</div></div>
+    <div class="tape"><div class="label">N1</div><div class="value" id="hud-n1">0%</div></div>
+  </div>
+  <div style="width:40px"></div>
+</div>
+
+<button class="pause-btn" id="btn-pause" aria-label="Pause">
+  <svg viewBox="0 0 24 24" fill="none" stroke="#e7edf3" stroke-width="2"><rect x="6" y="5" width="4" height="14"/><rect x="14" y="5" width="4" height="14"/></svg>
+</button>
+
+<div id="hud-bottom">
+  <!-- Throttle -->
+  <div class="throttle-wrap">
+    <div class="throttle-track" id="throttle-track">
+      <div class="throttle-fill" id="throttle-fill" style="height: 0%"></div>
+      <div class="throttle-handle" id="throttle-handle" style="bottom: 0px;">THR</div>
+    </div>
+    <div class="throttle-label" id="throttle-pct">0%</div>
+  </div>
+
+  <!-- Center cluster: rudder above, stick + actions below -->
+  <div style="display:flex; flex-direction:column; align-items:center; gap:8px;">
+    <div class="rudder-wrap">
+      <div class="rudder-track" id="rudder-track">
+        <div class="rudder-center-tick"></div>
+        <div class="rudder-handle" id="rudder-handle"></div>
+      </div>
+    </div>
+    <div style="display:flex; gap:14px; align-items:flex-end;">
+      <div class="stick-wrap" id="stick-wrap">
+        <div class="stick-crosshair"></div>
+        <div class="stick-knob" id="stick-knob"></div>
+      </div>
+
+      <div class="trim-col">
+        <div style="font-size:10px;color:var(--text-dim);letter-spacing:0.1em;">TRIM</div>
+        <div class="trim-btn" id="trim-up">▲ NOSE UP</div>
+        <div class="trim-btn" id="trim-down">▼ NOSE DN</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Action buttons -->
+  <div class="action-col">
+    <div class="btn" id="btn-flaps-down">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#e7edf3" stroke-width="2"><path d="M4 12h16M4 12l6-6M4 12l6 6"/></svg>
+      FLAPS
+    </div>
+    <div class="btn" id="btn-flaps-up">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#e7edf3" stroke-width="2"><path d="M20 12H4M20 12l-6-6M20 12l-6 6"/></svg>
+      FLAPS
+    </div>
+    <div class="btn" id="btn-gear">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#e7edf3" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8"/></svg>
+      GEAR
+    </div>
+    <div class="btn warn" id="btn-speedbrake">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#e7edf3" stroke-width="2"><path d="M3 17l9-11 9 11"/><path d="M3 17h18"/></svg>
+      SPD BRK
+    </div>
+    <div class="btn" id="btn-spoilers">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#e7edf3" stroke-width="2"><path d="M4 15l8-8 8 8"/></svg>
+      SPOILER
+    </div>
+    <div class="btn danger" id="btn-brake">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#e7edf3" stroke-width="2"><circle cx="12" cy="12" r="8"/><path d="M8 8l8 8M16 8l-8 8"/></svg>
+      BRAKE
+    </div>
+    <div class="btn" id="btn-parking">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#e7edf3" stroke-width="2"><path d="M6 4v16M6 4h9a4 4 0 010 8H6"/></svg>
+      PARK
+    </div>
+    <div class="btn warn" id="btn-reverse">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#e7edf3" stroke-width="2"><path d="M17 7l-10 10M7 7l10 10"/></svg>
+      REV
+    </div>
+  </div>
+</div>
+
+<script>
+// ---------------------------------------------------------------------
+// InputSnapshot mirror — field names match
+// simengine::systems::InputSnapshot exactly (see input_system.hpp) so a
+// future native bridge is a drop-in replacement for `sendInput()` below.
+// ---------------------------------------------------------------------
+const inputSnapshot = {
+  stickPitch: 0, stickRoll: 0, rudderPedal: 0, throttle: 0,
+  trimInput: 0, tiller: 0, brake: 0,
+  toggleGear: false, toggleFlapsUp: false, toggleFlapsDown: false,
+  toggleSpeedbrake: false, toggleReverse: false, toggleParkingBrake: false,
+  togglePause: false,
+};
+
+function sendInput() {
+  // Bridge point: in a wired build this posts inputSnapshot into the
+  // engine's InputSystem::apply() once per frame. For this mockup it
+  // just feeds the mock flight-state integrator below.
+  window.__lastInput = { ...inputSnapshot };
+  // one-shot toggles are consumed immediately, matching how a real
+  // input source should only pulse true on the press edge.
+  inputSnapshot.toggleGear = false;
+  inputSnapshot.toggleFlapsUp = false;
+  inputSnapshot.toggleFlapsDown = false;
+  inputSnapshot.toggleSpeedbrake = false;
+  inputSnapshot.toggleReverse = false;
+  inputSnapshot.toggleParkingBrake = false;
+  inputSnapshot.togglePause = false;
+}
+
+// --- generic drag helper ---
+function makeDraggable(el, onMove, onEnd) {
+  function point(e) {
+    const t = e.touches ? e.touches[0] : e;
+    return { x: t.clientX, y: t.clientY };
+  }
+  function down(e) {
+    e.preventDefault();
+    const rect = el.getBoundingClientRect();
+    function move(e2) { e2.preventDefault(); onMove(point(e2), rect); }
+    function up(e2) {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('touchmove', move);
+      window.removeEventListener('touchend', up);
+      if (onEnd) onEnd();
+    }
+    window.addEventListener('pointermove', move, { passive: false });
+    window.addEventListener('pointerup', up, { passive: false });
+    window.addEventListener('touchmove', move, { passive: false });
+    window.addEventListener('touchend', up, { passive: false });
+    move(e);
+  }
+  el.addEventListener('pointerdown', down, { passive: false });
+  el.addEventListener('touchstart', down, { passive: false });
+}
+
+// --- Throttle ---
+{
+  const track = document.getElementById('throttle-track');
+  const fill = document.getElementById('throttle-fill');
+  const handle = document.getElementById('throttle-handle');
+  const pctLabel = document.getElementById('throttle-pct');
+  function setThrottle(frac) {
+    frac = Math.max(0, Math.min(1, frac));
+    inputSnapshot.throttle = frac;
+    fill.style.height = (frac * 100) + '%';
+    handle.style.bottom = (frac * (track.clientHeight - 34)) + 'px';
+    pctLabel.textContent = Math.round(frac * 100) + '%';
+  }
+  makeDraggable(track, (pt, rect) => {
+    const frac = 1 - (pt.y - rect.top) / rect.height;
+    setThrottle(frac);
+  });
+  setThrottle(0);
+}
+
+// --- Virtual stick ---
+{
+  const wrap = document.getElementById('stick-wrap');
+  const knob = document.getElementById('stick-knob');
+  const maxR = 47;
+  function setStick(dx, dy) {
+    const mag = Math.min(1, Math.hypot(dx, dy));
+    const ang = Math.atan2(dy, dx);
+    const cx = Math.cos(ang) * mag * maxR;
+    const cy = Math.sin(ang) * mag * maxR;
+    knob.style.left = `calc(50% + ${cx}px)`;
+    knob.style.top = `calc(50% + ${cy}px)`;
+    inputSnapshot.stickRoll = cx / maxR;
+    inputSnapshot.stickPitch = -cy / maxR; // up = nose up = positive pitch command
+  }
+  makeDraggable(wrap, (pt, rect) => {
+    const cx0 = rect.left + rect.width / 2;
+    const cy0 = rect.top + rect.height / 2;
+    setStick(pt.x - cx0, pt.y - cy0);
+  }, () => setStick(0, 0)); // self-centering on release
+  setStick(0, 0);
+}
+
+// --- Rudder pedal slider ---
+{
+  const track = document.getElementById('rudder-track');
+  const handle = document.getElementById('rudder-handle');
+  function setRudder(frac) {
+    frac = Math.max(-1, Math.min(1, frac));
+    inputSnapshot.rudderPedal = frac;
+    const trackW = track.clientWidth - 44;
+    handle.style.left = `calc(50% + ${frac * (trackW / 2)}px)`;
+  }
+  makeDraggable(track, (pt, rect) => {
+    const frac = ((pt.x - rect.left) / rect.width - 0.5) * 2;
+    setRudder(frac);
+  }, () => setRudder(0)); // self-centering
+  setRudder(0);
+}
+
+// --- Toggle / momentary buttons ---
+function wireToggleButton(id, key) {
+  const el = document.getElementById(id);
+  el.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    inputSnapshot[key] = true;
+    el.classList.toggle('active');
+  });
+}
+function wireMomentaryButton(id, key) {
+  const el = document.getElementById(id);
+  const set = (v) => { inputSnapshot[key] = v; el.classList.toggle('active', v > 0); };
+  el.addEventListener('pointerdown', (e) => { e.preventDefault(); set(1); });
+  el.addEventListener('pointerup', () => set(0));
+  el.addEventListener('pointerleave', () => set(0));
+}
+
+wireToggleButton('btn-gear', 'toggleGear');
+wireToggleButton('btn-speedbrake', 'toggleSpeedbrake');
+wireToggleButton('btn-spoilers', 'toggleSpeedbrake'); // ganged with speedbrake this Alpha, see animation_system.hpp
+wireToggleButton('btn-reverse', 'toggleReverse');
+wireToggleButton('btn-parking', 'toggleParkingBrake');
+wireToggleButton('btn-pause', 'togglePause');
+wireMomentaryButton('btn-brake', 'brake');
+
+document.getElementById('btn-flaps-down').addEventListener('pointerdown', (e) => {
+  e.preventDefault(); inputSnapshot.toggleFlapsDown = true;
+});
+document.getElementById('btn-flaps-up').addEventListener('pointerdown', (e) => {
+  e.preventDefault(); inputSnapshot.toggleFlapsUp = true;
+});
+
+let trimHeld = 0;
+document.getElementById('trim-up').addEventListener('pointerdown', () => trimHeld = 1);
+document.getElementById('trim-down').addEventListener('pointerdown', () => trimHeld = -1);
+window.addEventListener('pointerup', () => trimHeld = 0);
+
+// ---------------------------------------------------------------------
+// Mock flight-state loop — purely for this mockup's HUD readout; not
+// simengine's actual RK4 integrator. Demonstrates the UI end-to-end
+// without requiring the native build to be running in-browser.
+// ---------------------------------------------------------------------
+const mockState = { ias: 0, alt: 2, n1: 0 };
+setInterval(() => {
+  inputSnapshot.trimInput = trimHeld;
+  sendInput();
+  const target = inputSnapshot.throttle * 100;
+  mockState.n1 += (target - mockState.n1) * 0.05;
+  mockState.ias += (inputSnapshot.throttle * 90 - mockState.ias) * 0.01;
+  document.getElementById('hud-ias').textContent = Math.round(mockState.ias);
+  document.getElementById('hud-alt').textContent = mockState.alt.toFixed(1);
+  document.getElementById('hud-n1').textContent = Math.round(mockState.n1) + '%';
+}, 1000 / 30);
+</script>
+</body>
+</html>

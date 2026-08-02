@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<!--
+  mobile_ui/joystick_throttle.html — Minimal touch UI: joystick + throttle only.
+
+  Trimmed-down sibling of mobile_ui/index.html (which has the full
+  control set: rudder pedals, flaps/gear/speedbrake/spoiler/brake/
+  parking/reverse buttons, trim). This file keeps only the virtual
+  stick (pitch/roll) and the vertical throttle lever, per request.
+
+  Same InputSnapshot field contract as index.html
+  (simengine::systems::InputSnapshot, see input_system.hpp) so wiring
+  this to the native build later is a drop-in replacement for
+  sendInput(), same as the full UI.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>simengine — Joystick + Throttle</title>
+<style>
+  :root {
+    --panel: rgba(20, 24, 30, 0.72);
+    --panel-border: rgba(255,255,255,0.08);
+    --accent: #3ea6ff;
+    --text: #e7edf3;
+    --text-dim: #8b98a5;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    background: linear-gradient(180deg, #6f96b8 0%, #cfe0ea 55%, #9aa79b 100%);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    color: var(--text);
+    overflow: hidden;
+    touch-action: none;
+  }
+  #world {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; color: rgba(0,0,0,0.35); letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  #hud-top {
+    position: absolute; top: 0; left: 0; right: 0;
+    display: flex; justify-content: center; gap: 10px;
+    padding: env(safe-area-inset-top, 12px) 16px 0 16px;
+    pointer-events: none;
+  }
+  .tape {
+    background: var(--panel); border: 1px solid var(--panel-border);
+    border-radius: 10px; padding: 6px 14px;
+    font-variant-numeric: tabular-nums; backdrop-filter: blur(6px);
+  }
+  .tape .label { font-size: 10px; color: var(--text-dim); letter-spacing: 0.08em; }
+  .tape .value { font-size: 20px; font-weight: 600; }
+
+  #hud-bottom {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    display: flex; align-items: flex-end; justify-content: center;
+    padding: 0 10px env(safe-area-inset-bottom, 24px) 10px;
+    gap: 36px;
+  }
+
+  /* --- Throttle (vertical) --- */
+  .throttle-wrap { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .throttle-track {
+    position: relative; width: 60px; height: 260px;
+    background: var(--panel); border: 1px solid var(--panel-border);
+    border-radius: 30px; backdrop-filter: blur(6px);
+  }
+  .throttle-fill {
+    position: absolute; left: 4px; right: 4px; bottom: 4px;
+    border-radius: 22px;
+    background: linear-gradient(180deg, var(--accent), #1d6fae);
+    transition: height 0.05s linear;
+  }
+  .throttle-handle {
+    position: absolute; left: -8px; right: -8px; height: 36px;
+    background: #f2f5f8; border-radius: 10px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; color: #222; letter-spacing: 0.05em;
+  }
+  .throttle-label { font-size: 12px; color: var(--text-dim); letter-spacing: 0.1em; }
+
+  /* --- Virtual joystick --- */
+  .stick-wrap {
+    position: relative; width: 190px; height: 190px;
+    background: var(--panel); border: 1px solid var(--panel-border);
+    border-radius: 50%; backdrop-filter: blur(6px);
+  }
+  .stick-crosshair { position: absolute; inset: 0; }
+  .stick-crosshair::before, .stick-crosshair::after {
+    content: ''; position: absolute; background: rgba(255,255,255,0.12);
+  }
+  .stick-crosshair::before { left: 50%; top: 8%; bottom: 8%; width: 1px; transform: translateX(-50%); }
+  .stick-crosshair::after { top: 50%; left: 8%; right: 8%; height: 1px; transform: translateY(-50%); }
+  .stick-knob {
+    position: absolute; width: 68px; height: 68px; border-radius: 50%;
+    left: 50%; top: 50%;
+    background: radial-gradient(circle at 35% 30%, #fdfefe, #cfd6dc);
+    box-shadow: 0 3px 8px rgba(0,0,0,0.45);
+    transform: translate(-50%, -50%);
+  }
+  .stick-label { font-size: 12px; color: var(--text-dim); letter-spacing: 0.1em; text-align: center; margin-top: 6px; }
+</style>
+</head>
+<body>
+
+<div id="world">— infinite grey baseplate —</div>
+
+<div id="hud-top">
+  <div class="tape"><div class="label">IAS</div><div class="value" id="hud-ias">0</div></div>
+  <div class="tape"><div class="label">ALT (AGL)</div><div class="value" id="hud-alt">0</div></div>
+  <div class="tape"><div class="label">N1</div><div class="value" id="hud-n1">0%</div></div>
+</div>
+
+<div id="hud-bottom">
+  <div class="throttle-wrap">
+    <div class="throttle-track" id="throttle-track">
+      <div class="throttle-fill" id="throttle-fill" style="height: 0%"></div>
+      <div class="throttle-handle" id="throttle-handle" style="bottom: 0px;">THR</div>
+    </div>
+    <div class="throttle-label" id="throttle-pct">0%</div>
+  </div>
+
+  <div>
+    <div class="stick-wrap" id="stick-wrap">
+      <div class="stick-crosshair"></div>
+      <div class="stick-knob" id="stick-knob"></div>
+    </div>
+    <div class="stick-label">PITCH / ROLL</div>
+  </div>
+</div>
+
+<script>
+// Same field names as simengine::systems::InputSnapshot (input_system.hpp)
+// — only stickPitch/stickRoll/throttle are driven from this minimal UI.
+const inputSnapshot = { stickPitch: 0, stickRoll: 0, throttle: 0 };
+
+function sendInput() {
+  // Bridge point: a wired build posts this into InputSystem::apply()
+  // once per tick. For this mockup it just feeds the mock HUD loop.
+  window.__lastInput = { ...inputSnapshot };
+}
+
+function makeDraggable(el, onMove, onEnd) {
+  function point(e) { const t = e.touches ? e.touches[0] : e; return { x: t.clientX, y: t.clientY }; }
+  function down(e) {
+    e.preventDefault();
+    const rect = el.getBoundingClientRect();
+    function move(e2) { e2.preventDefault(); onMove(point(e2), rect); }
+    function up() {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('touchmove', move);
+      window.removeEventListener('touchend', up);
+      if (onEnd) onEnd();
+    }
+    window.addEventListener('pointermove', move, { passive: false });
+    window.addEventListener('pointerup', up, { passive: false });
+    window.addEventListener('touchmove', move, { passive: false });
+    window.addEventListener('touchend', up, { passive: false });
+    move(e);
+  }
+  el.addEventListener('pointerdown', down, { passive: false });
+  el.addEventListener('touchstart', down, { passive: false });
+}
+
+// --- Throttle ---
+{
+  const track = document.getElementById('throttle-track');
+  const fill = document.getElementById('throttle-fill');
+  const handle = document.getElementById('throttle-handle');
+  const pctLabel = document.getElementById('throttle-pct');
+  function setThrottle(frac) {
+    frac = Math.max(0, Math.min(1, frac));
+    inputSnapshot.throttle = frac;
+    fill.style.height = (frac * 100) + '%';
+    handle.style.bottom = (frac * (track.clientHeight - 36)) + 'px';
+    pctLabel.textContent = Math.round(frac * 100) + '%';
+  }
+  makeDraggable(track, (pt, rect) => {
+    const frac = 1 - (pt.y - rect.top) / rect.height;
+    setThrottle(frac);
+  });
+  setThrottle(0);
+}
+
+// --- Virtual stick ---
+{
+  const wrap = document.getElementById('stick-wrap');
+  const knob = document.getElementById('stick-knob');
+  const maxR = 60;
+  function setStick(dx, dy) {
+    const mag = Math.min(1, Math.hypot(dx, dy));
+    const ang = Math.atan2(dy, dx);
+    const cx = Math.cos(ang) * mag * maxR;
+    const cy = Math.sin(ang) * mag * maxR;
+    knob.style.left = `calc(50% + ${cx}px)`;
+    knob.style.top = `calc(50% + ${cy}px)`;
+    inputSnapshot.stickRoll = cx / maxR;
+    inputSnapshot.stickPitch = -cy / maxR; // up = nose up = positive pitch command
+  }
+  makeDraggable(wrap, (pt, rect) => {
+    const cx0 = rect.left + rect.width / 2;
+    const cy0 = rect.top + rect.height / 2;
+    setStick(pt.x - cx0, pt.y - cy0);
+  }, () => setStick(0, 0)); // self-centering on release
+  setStick(0, 0);
+}
+
+// Mock HUD loop, purely cosmetic for this standalone preview.
+const mockState = { ias: 0, alt: 2, n1: 0 };
+setInterval(() => {
+  sendInput();
+  const target = inputSnapshot.throttle * 100;
+  mockState.n1 += (target - mockState.n1) * 0.05;
+  mockState.ias += (inputSnapshot.throttle * 90 - mockState.ias) * 0.01;
+  document.getElementById('hud-ias').textContent = Math.round(mockState.ias);
+  document.getElementById('hud-alt').textContent = mockState.alt.toFixed(1);
+  document.getElementById('hud-n1').textContent = Math.round(mockState.n1) + '%';
+}, 1000 / 30);
+</script>
+</body>
+</html>
